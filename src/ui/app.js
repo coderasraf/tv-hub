@@ -50,6 +50,9 @@ const ICONS = {
   gear: 'M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zM10.3 2h3.4l.5 2.6 1.6.9 2.5-.9 1.7 2.9-2 1.8v1.4l2 1.8-1.7 2.9-2.5-.9-1.6.9-.5 2.6h-3.4l-.5-2.6-1.6-.9-2.5.9-1.7-2.9 2-1.8V9.3l-2-1.8 1.7-2.9 2.5.9 1.6-.9z',
   external: 'M14 3h7v7h-2V6.4l-8.3 8.3-1.4-1.4L17.6 5H14zM5 5h6v2H5v12h12v-6h2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z',
   fullscreen: 'M3 3h7v2H5v5H3zm11 0h7v7h-2V5h-5zM3 14h2v5h5v2H3zm16 0h2v7h-7v-2h5z',
+  theater: 'M2 6h20v12H2zm2 2v8h16V8z',
+  defaultView: 'M2 5h20v14H2zm2 2v10h10V7zm12 0v10h4V7z',
+  expand: 'M4 4h7v2H7.4l4.3 4.3-1.4 1.4L6 7.4V11H4zm16 16h-7v-2h3.6l-4.3-4.3 1.4-1.4 4.3 4.3V13h2z',
   close: 'M6.4 5L12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z',
   refresh: 'M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h7V4z',
   youtube: 'M21.6 7.2a2.5 2.5 0 0 0-1.8-1.8C18.2 5 12 5 12 5s-6.2 0-7.8.4A2.5 2.5 0 0 0 2.4 7.2 26 26 0 0 0 2 12a26 26 0 0 0 .4 4.8 2.5 2.5 0 0 0 1.8 1.8C5.8 19 12 19 12 19s6.2 0 7.8-.4a2.5 2.5 0 0 0 1.8-1.8A26 26 0 0 0 22 12a26 26 0 0 0-.4-4.8zM10 15V9l5.2 3z',
@@ -143,7 +146,7 @@ function card(c, list) {
     class: `card ${c.status === 'offline' ? 'offline' : ''} ${S.current?.id === c.id ? 'playing' : ''}`,
     'data-id': c.id,
     title: c.name,
-    onclick: () => play(c, list),
+    onclick: () => play(c, list, true),
   },
   h('div', { class: 'art' }, thumb, logo(c),
     h('div', { class: 'tags' }, statusBadge(c), c.kind === 'youtube' && h('span', { class: 'badge yt', text: 'YouTube' }),
@@ -182,7 +185,9 @@ function route() {
   S.route = decodeURIComponent(location.hash.replace(/^#\/?/, '')) || 'home';
   if (S.route.startsWith('cat/')) S.route = 'cat/' + encodeURIComponent(S.route.slice(4));
   render();
-  $('#view').scrollTop = 0;
+  // A new page gets the whole window; a playing channel moves to the corner.
+  collapsePlayer();
+  $('#scroll').scrollTop = 0;
 }
 
 function render() {
@@ -272,18 +277,25 @@ function stopPlayback() {
   if (P.hls) { P.hls.destroy(); P.hls = null; }
   if (P.yt) { try { P.yt.destroy(); } catch { /* already gone */ } P.yt = null; }
   if (P.video) { P.video.pause(); P.video.removeAttribute('src'); P.video.load(); P.video = null; }
+  screenEl()?.querySelectorAll('video, iframe, .yt, .msg').forEach((el) => el.remove());
 }
 
 function closePlayer() {
   stopPlayback();
   setFullscreen(false);
+  miniObserver?.disconnect();
   S.current = null;
-  $('#player').hidden = true;
-  $('#player').replaceChildren();
+  const panel = $('#player');
+  panel.hidden = true;
+  panel.classList.remove('theater', 'collapsed');
+  panel.replaceChildren();
   render();
 }
 
-function play(c, list) {
+// `expand`: the user picked this channel from a page, so show the full
+// player. Zapping (arrows, next/previous) keeps the current size.
+function play(c, list, expand = false) {
+  if (expand) expandPlayer();
   if (list) S.list = list;
   if (!S.list.some((x) => x.id === c.id)) S.list = [c];
   S.current = c;
@@ -328,10 +340,122 @@ function externalButton(c) {
   icon(yt ? 'youtube' : 'external'), yt ? 'Open on YouTube' : 'Open in VLC');
 }
 
+// ---------- player size: default (auto-fit or dragged), theater, mini ----------
+const PREFS_KEY = 'tvhub.player';
+const prefs = (() => {
+  try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch { return {}; }
+})();
+function savePrefs() {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* private mode: not remembered */ }
+}
+
+// Fills the width beside the info column, up to 70% of the window height.
+function autoPlayerHeight() {
+  const videoW = $('.main').clientWidth - 44 - 18 - 340;
+  return Math.round(Math.min(Math.max(videoW * 9 / 16, 240), innerHeight * 0.7)) + 32;
+}
+function layoutPlayer() {
+  const h = prefs.height ? Math.min(prefs.height, innerHeight * 0.88) : autoPlayerHeight();
+  $('#player').style.setProperty('--player-h', `${Math.round(h)}px`);
+}
+window.addEventListener('resize', layoutPlayer);
+
+function startResize(e) {
+  e.preventDefault();
+  const panel = $('#player');
+  const startY = e.clientY;
+  const startH = panel.getBoundingClientRect().height;
+  panel.classList.add('resizing');
+  const move = (ev) => {
+    prefs.height = Math.round(Math.min(Math.max(startH + ev.clientY - startY, 200), innerHeight * 0.88));
+    layoutPlayer();
+  };
+  const up = () => {
+    removeEventListener('pointermove', move);
+    removeEventListener('pointerup', up);
+    panel.classList.remove('resizing');
+    savePrefs();
+  };
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+}
+function resetSize() {
+  delete prefs.height;
+  savePrefs();
+  layoutPlayer();
+  toast('Player size reset to fit the window');
+}
+
+function toggleTheater() {
+  prefs.theater = !prefs.theater;
+  savePrefs();
+  $('#player').classList.toggle('theater', !!prefs.theater);
+  screenEl()?.classList.remove('mini');
+  if (prefs.theater) $('#scroll').scrollTo({ top: 0 });
+  renderPlayer();
+}
+
+// In theater mode the player scrolls with the page; once it's mostly out
+// of view, the video floats in a corner. Only CSS changes, never the DOM,
+// so the stream (or the YouTube iframe) keeps playing.
+let miniObserver;
+function observeMini(box) {
+  miniObserver?.disconnect();
+  miniObserver = new IntersectionObserver(([entry]) => {
+    const mini = !!S.current && !!prefs.theater && !isFullscreen() && !isCollapsed() && !entry.isIntersecting;
+    box.querySelector('.screen').classList.toggle('mini', mini);
+  }, { root: $('#scroll'), threshold: 0.35 });
+  miniObserver.observe(box);
+}
+
+// Opening another page while a channel plays shrinks the player into the
+// corner, so the page gets the whole window. Picking a channel or the
+// expand button brings it back.
+const isCollapsed = () => $('#player').classList.contains('collapsed');
+function collapsePlayer() {
+  if (!S.current || isFullscreen()) return;
+  $('#player').classList.add('collapsed');
+  screenEl()?.classList.remove('mini');
+}
+function expandPlayer() {
+  $('#player').classList.remove('collapsed');
+  $('#scroll').scrollTo({ top: 0 });
+}
+
+function ensureScreen(panel) {
+  let box = panel.querySelector('.screen-box');
+  if (box) return box;
+  const hud = (cls, title, iconName, onclick) => h('button', { class: `hud-btn ${cls}`, title, onclick: (e) => { e.stopPropagation(); onclick(); } }, icon(iconName));
+  box = h('div', { class: 'screen-box' },
+    h('div', { class: 'screen', ondblclick: () => (isCollapsed() ? expandPlayer() : setFullscreen(!isFullscreen())), onmousemove: showOsd },
+      h('div', { class: 'osd' }),
+      h('div', { class: 'hud' },
+        hud('big-only', 'Theater mode (T)', 'theater', toggleTheater),
+        hud('big-only', 'Full screen (F)', 'fullscreen', () => setFullscreen(!isFullscreen())),
+        hud('mini-only', 'Back to the player', 'expand', () => $('#scroll').scrollTo({ top: 0, behavior: 'smooth' })),
+        hud('mini-only', 'Close', 'close', closePlayer))));
+  panel.replaceChildren(box,
+    h('div', { class: 'resize', title: 'Drag to resize · double-click to fit the window', onpointerdown: startResize, ondblclick: resetSize }),
+    h('div', { class: 'minibar' }));
+  observeMini(box);
+  return box;
+}
+
 function renderPlayer() {
   const c = S.current;
   const panel = $('#player');
   panel.hidden = false;
+  panel.classList.toggle('theater', !!prefs.theater);
+  layoutPlayer();
+  const box = ensureScreen(panel);
+  box.querySelector('.osd').replaceChildren(logo(c), h('div', {}, h('b', { text: c.name }), h('small', { text: `${c.category} · ${c.region}` })));
+  panel.querySelector('.minibar').replaceChildren(
+    logo(c),
+    h('div', { class: 't', title: 'Back to the full player', onclick: expandPlayer }, h('b', { text: c.name }), h('small', {}, statusBadge(c), c.category)),
+    h('button', { class: 'btn icon', title: 'Previous channel (↑)', onclick: () => zap(-1) }, icon('prev')),
+    h('button', { class: 'btn icon', title: 'Next channel (↓)', onclick: () => zap(1) }, icon('next')),
+    h('button', { class: 'btn icon', title: 'Back to the full player', onclick: expandPlayer }, icon('expand')),
+    h('button', { class: 'btn icon', title: 'Close', onclick: closePlayer }, icon('close')));
   const fav = S.favorites.has(c.id);
   const sources = c.kind === 'stream' && c.sources.length > 1
     ? h('div', { class: 'sources' }, 'Source:', c.sources.map((s, i) => h('button', {
@@ -345,10 +469,7 @@ function renderPlayer() {
   const upnext = live.length > 1 ? h('div', { class: 'upnext' }, h('div', { class: 'label', text: 'Channels' }),
     live.slice(0, 80).map((x) => h('a', { class: x.id === c.id ? 'on' : '', onclick: () => play(x) }, logo(x), h('span', { text: x.name })))) : null;
 
-  panel.replaceChildren(
-    h('div', { class: 'screen', ondblclick: () => setFullscreen(!isFullscreen()), onmousemove: showOsd },
-      h('div', { class: 'osd' }, logo(c), h('div', {}, h('b', { text: c.name }), h('small', { text: `${c.category} · ${c.region}` })))),
-    h('div', { class: 'info' },
+  const info = h('div', { class: 'info' },
       h('div', { class: 'head' }, logo(c), h('div', { style: 'min-width:0' }, h('h2', { text: c.name }),
         h('div', { class: 'sub' }, statusBadge(c), c.kind === 'youtube' && h('span', { class: 'badge yt', text: 'YouTube' }),
           h('span', { text: [c.category, c.region, c.part_time && 'not on air 24/7'].filter(Boolean).join(' · ') })))),
@@ -357,16 +478,25 @@ function renderPlayer() {
         h('button', { class: 'btn icon', title: 'Previous channel (↑)', onclick: () => zap(-1) }, icon('prev')),
         h('button', { class: 'btn icon', title: 'Next channel (↓)', onclick: () => zap(1) }, icon('next')),
         h('button', { class: `btn ${fav ? 'on' : ''}`, onclick: () => toggleFavorite(c) }, icon(fav ? 'star' : 'starO'), fav ? 'Favorite' : 'Add to favorites'),
+        h('button', { class: 'btn icon', title: prefs.theater ? 'Default view (T)' : 'Theater mode (T)', onclick: toggleTheater }, icon(prefs.theater ? 'defaultView' : 'theater')),
         h('button', { class: 'btn icon', title: 'Full screen (F)', onclick: () => setFullscreen(true) }, icon('fullscreen')),
         externalButton(c),
         h('button', { class: 'btn icon', title: 'Close player', onclick: closePlayer }, icon('close'))),
       sources,
-      upnext),
-  );
+      upnext);
+  const old = panel.querySelector('.info');
+  if (old) old.replaceWith(info);
+  else box.after(info);
   // Scroll only the list, never the page, to the playing channel.
   const list = panel.querySelector('.upnext');
   const on = list?.querySelector('a.on');
-  if (on) list.scrollTop = on.offsetTop - list.offsetTop - list.clientHeight / 2 + on.clientHeight / 2;
+  if (on) {
+    // Vertical list beside the video; horizontal strip in theater mode.
+    const l = list.getBoundingClientRect();
+    const o = on.getBoundingClientRect();
+    list.scrollTop += o.top - l.top - (l.height - o.height) / 2;
+    list.scrollLeft += o.left - l.left - (l.width - o.width) / 2;
+  }
 }
 
 function showOsd() {
@@ -405,6 +535,7 @@ function startStream(c) {
     if (token !== P.token) return;
     const next = c.sources.findIndex((_, i) => !P.tried.has(i));
     if (next >= 0) {
+      stopPlayback();
       P.sourceIndex = next;
       renderPlayer();
       startStream(c);
@@ -507,7 +638,6 @@ async function toggleFavorite(c) {
   on ? S.favorites.add(c.id) : S.favorites.delete(c.id);
   toast(on ? `${c.name} added to favorites` : `${c.name} removed from favorites`);
   renderPlayer();
-  if (P.video || P.yt) clearMessage();
   render();
 }
 
@@ -517,6 +647,10 @@ const isFullscreen = () => $('#player').classList.contains('fs');
 function setFullscreen(on) {
   if (on && !S.current) return;
   $('#player').classList.toggle('fs', on);
+  if (on) {
+    $('#player').classList.remove('collapsed');
+    screenEl()?.classList.remove('mini');
+  }
   if (window.ipc) window.ipc.postMessage(on ? 'fullscreen:1' : 'fullscreen:0');
   else if (on && !document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
   else if (!on && document.fullscreenElement) document.exitFullscreen?.();
@@ -539,6 +673,7 @@ document.addEventListener('keydown', (e) => {
     case 'ArrowUp': case 'PageUp': e.preventDefault(); zap(-1); break;
     case 'ArrowDown': case 'PageDown': e.preventDefault(); zap(1); break;
     case 'f': case 'F': setFullscreen(!isFullscreen()); break;
+    case 't': case 'T': if (!isFullscreen()) toggleTheater(); break;
     case 'm': case 'M':
       if (v) v.muted = !v.muted;
       else if (P.yt?.isMuted) P.yt.isMuted() ? P.yt.unMute() : P.yt.mute();
@@ -580,20 +715,14 @@ async function pollStatus() {
         S.wasRunning = false;
         await loadChannels();
         render();
-        if (S.current) renderPlayerKeepingVideo();
+        // Refreshes the badges; the video area is kept, so playback goes on.
+        if (S.current) renderPlayer();
       }
       pollTimer = setTimeout(pollStatus, 15000);
     }
   } catch {
     pollTimer = setTimeout(pollStatus, 5000);
   }
-}
-// After a check, refresh the badges without restarting the stream.
-function renderPlayerKeepingVideo() {
-  const scr = screenEl();
-  const media = scr && [...scr.children].filter((n) => !n.classList.contains('osd'));
-  renderPlayer();
-  if (media?.length) screenEl().prepend(...media);
 }
 
 // ---------- settings ----------
@@ -717,7 +846,11 @@ async function saveSettings() {
 let searchTimer;
 $('#q').addEventListener('input', (e) => {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => { S.query = e.target.value.trim(); render(); }, 150);
+  searchTimer = setTimeout(() => {
+    S.query = e.target.value.trim();
+    if (S.query) collapsePlayer();
+    render();
+  }, 150);
 });
 window.addEventListener('hashchange', () => {
   if (!location.hash.startsWith('#/settings')) draft = null;

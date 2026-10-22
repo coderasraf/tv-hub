@@ -10,6 +10,13 @@ Live TV in one window: Bangladeshi, Bengali and free sports channels from M3U pl
 
 Streams play in the window through a local proxy, which works around missing CORS headers and adds the headers some streams need. Each channel's backup sources are tried in turn. Anything the window can't decode opens in VLC.
 
+## Player size
+
+- **Default view**: the video fills the width beside the channel list and stays pinned while you browse. Drag the player's bottom edge to resize it; double-click the edge to fit it to the window again. The size is remembered.
+- **Theater mode**: the video spans the full width, with the controls and a channel strip underneath. Scroll down to browse, and the video keeps playing in a corner mini player.
+- **Full screen**: fills the whole screen.
+- **Mini player**: opening another page or searching while a channel plays shrinks it into the bottom-right corner, YouTube style, so the page gets the whole window. The mini player has previous/next channel, expand and close. Clicking a channel card, the mini player's title or the expand button brings back the full player. Playback never restarts when the player changes size.
+
 ## Keys
 
 | Key | Action |
@@ -17,6 +24,7 @@ Streams play in the window through a local proxy, which works around missing COR
 | ↑ / ↓ or PgUp / PgDn | Previous / next channel |
 | ← / → | Volume |
 | F or double-click | Full screen |
+| T | Theater mode (full-width video; scrolling down turns it into a mini player) |
 | M | Mute |
 | Space | Pause |
 | / | Search |
