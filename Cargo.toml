@@ -1,0 +1,43 @@
+[package]
+name = "tv-hub"
+version = "0.1.0"
+edition = "2021"
+description = "TV Hub: live TV from IPTV playlists and YouTube live channels, checked and playable in one window"
+build = "build.rs"
+
+[lib]
+name = "tvhub"
+path = "src/lib.rs"
+
+# Command-line interface.
+[[bin]]
+name = "tvhub"
+path = "src/main.rs"
+
+# Desktop app: the web UI in a native window.
+[[bin]]
+name = "tv-hub"
+path = "src/desktop.rs"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+bytes = "1"
+clap = { version = "4", features = ["derive"] }
+futures = "0.3"
+regex = "1"
+reqwest = { version = "0.12", features = ["gzip", "json", "stream"] }
+rfd = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tao = "0.37"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net", "sync", "fs"] }
+toml = "0.8"
+url = "2"
+wry = "0.57"
+
+[build-dependencies]
+embed-resource = "3"
+
+[profile.release]
+strip = true
