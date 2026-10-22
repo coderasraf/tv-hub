@@ -71,10 +71,12 @@ static FREE_SPORTS: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Whether a curated playlist keeps this entry.
 pub fn allowed(curation: Curation, e: &Entry, category: &str) -> bool {
-    match curation {
-        Curation::None => true,
-        _ if category == "Sports" || curation == Curation::Sports => FREE_SPORTS.is_match(&e.name),
-        Curation::Free => !PAY_TV.is_match(&e.name),
+    if curation == Curation::None {
+        true
+    } else if category == "Sports" || curation == Curation::Sports {
+        FREE_SPORTS.is_match(&e.name)
+    } else {
+        !PAY_TV.is_match(&e.name)
     }
 }
 

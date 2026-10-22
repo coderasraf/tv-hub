@@ -33,20 +33,22 @@ pub struct Results {
 }
 
 pub async fn check_all(proxy: &Proxy, channels: &[Channel], progress: &Progress) -> Results {
-    let sources: Vec<&Source> = channels.iter().flat_map(|c| &c.sources).collect();
-    let handles: Vec<&str> = channels
+    // Owned copies: futures borrowing from the slice trip up the compiler's
+    // `Send` inference once this runs inside `tokio::spawn`.
+    let sources: Vec<Source> = channels.iter().flat_map(|c| c.sources.iter().cloned()).collect();
+    let handles: Vec<String> = channels
         .iter()
         .filter(|c| c.kind == Kind::Youtube)
-        .filter_map(|c| c.handle.as_deref())
+        .filter_map(|c| c.handle.clone())
         .collect();
     progress.total.store(sources.len() + handles.len(), Ordering::Relaxed);
     progress.done.store(0, Ordering::Relaxed);
 
     let health = stream::iter(sources)
         .map(|s| async move {
-            let ok = check_stream(proxy, s).await;
+            let ok = check_stream(proxy, &s).await;
             progress.done.fetch_add(1, Ordering::Relaxed);
-            (s.url.clone(), Health { ok, checked: now() })
+            (s.url, Health { ok, checked: now() })
         })
         .buffer_unordered(CONCURRENCY)
         .collect::<HashMap<_, _>>()
@@ -54,7 +56,7 @@ pub async fn check_all(proxy: &Proxy, channels: &[Channel], progress: &Progress)
 
     let youtube = stream::iter(handles)
         .map(|h| async move {
-            let status = check_youtube(proxy, h).await;
+            let status = check_youtube(proxy, &h).await;
             progress.done.fetch_add(1, Ordering::Relaxed);
             (h.to_lowercase(), status)
         })
