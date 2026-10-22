@@ -1,1 +1,33 @@
 <!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TV Hub</title>
+<link rel="icon" href="/logo.png">
+<link rel="stylesheet" href="/app.css">
+<script src="/hls.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <a class="brand" href="#/home"><img src="/logo.png" alt=""><span>TV Hub</span></a>
+    <nav id="nav"></nav>
+  </aside>
+  <main class="main">
+    <header class="top">
+      <label class="search">
+        <svg viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 0 1 5.9 12.1l4.2 4.2-1.4 1.4-4.2-4.2A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/></svg>
+        <input id="q" type="search" placeholder="Search channels  ( / )" autocomplete="off" spellcheck="false">
+      </label>
+      <div id="regions" class="chips"></div>
+      <div id="checking" class="checking" hidden></div>
+    </header>
+    <section id="player" class="player" hidden></section>
+    <div id="view" class="view"></div>
+  </main>
+</div>
+<div id="toast" class="toast" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>
